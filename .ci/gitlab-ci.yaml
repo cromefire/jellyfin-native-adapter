@@ -1,0 +1,73 @@
+image: node:12-alpine
+
+cache: &global_cache
+  key: "${CI_COMMIT_REF_SLUG}"
+  policy: pull
+  paths:
+    - node_modules
+
+before_script:
+  - yarn install --frozen-lockfile
+
+build:
+  stage: build
+  cache:
+    <<: *global_cache
+    policy: pull-push
+  script:
+    - yarn build
+  artifacts:
+    name: dist
+    paths:
+      - dist
+
+
+pages:
+  only:
+    - master
+  stage: build
+  script:
+    - yarn docs
+  artifacts:
+    paths:
+      - public
+
+lint:
+  stage: test
+  needs: []
+  dependencies: []
+  script:
+    - yarn lint --color
+
+publish-nightly:
+  only:
+    - master
+  needs:
+    - build
+    - lint
+  dependencies:
+    - build
+  stage: deploy
+  before_script:
+    - apk add jq moreutils
+  script:
+    - version="$(jq '.version' package.json -r)"
+    - jq ".version = \"${version}-nightly${CI_PIPELINE_IID}\"" package.json | sponge package.json
+    - echo "//gitlab.com/api/v4/projects/${CI_PROJECT_ID}/packages/npm/:_authToken=${CI_JOB_TOKEN}" > .npmrc
+    - npm publish --no-git-tag-version --tag next
+
+publish-latest:
+  only:
+    refs:
+      - tags
+  needs:
+    - build
+    - lint
+  dependencies:
+    - build
+  stage: deploy
+  before_script:
+    - apk add jq
+  script:
+    - echo "//gitlab.com/api/v4/projects/${CI_PROJECT_ID}/packages/npm/:_authToken=${CI_JOB_TOKEN}" > .npmrc
+    - npm publish --no-git-tag-version
